@@ -153,6 +153,48 @@ export async function launchMt5Terminal(
     // Best-effort copy to base
   }
 
+  // Copy network cache (servers.dat, dnsperf.dat) into instance config so broker discovery is instant
+  const baseTerminalDir = path.dirname(config.terminalExePath);
+  const baseConfigDir = path.join(baseTerminalDir, "config");
+  if (fs.existsSync(baseConfigDir)) {
+    for (const f of ["servers.dat", "dnsperf.dat"]) {
+      const src = path.join(baseConfigDir, f);
+      const dst = path.join(configDir, f);
+      if (fs.existsSync(src) && !fs.existsSync(dst)) {
+        try { fs.copyFileSync(src, dst); } catch {}
+      }
+    }
+  }
+
+  // Copy bases directory into instance dir
+  const baseBasesDir = path.join(baseTerminalDir, "bases");
+  const instanceBasesDir = path.join(instanceDir, "bases");
+  if (fs.existsSync(baseBasesDir) && !fs.existsSync(instanceBasesDir)) {
+    try {
+      fs.cpSync(baseBasesDir, instanceBasesDir, { recursive: true });
+    } catch {}
+  }
+
+  // RULE: MT5 forbids multiple instances running out of the same directory in portable mode.
+  // We hardlink/copy terminal64.exe directly into instanceDir so each account has its own isolated executable root.
+  const instanceExePath = path.join(instanceDir, "terminal64.exe");
+  if (!fs.existsSync(instanceExePath) && fs.existsSync(config.terminalExePath)) {
+    try {
+      fs.linkSync(config.terminalExePath, instanceExePath);
+    } catch {
+      try {
+        fs.copyFileSync(config.terminalExePath, instanceExePath);
+      } catch (err) {
+        console.warn("[Launcher] Could not link/copy terminal64.exe to instance dir:", err);
+      }
+    }
+  }
+
+  const targetExe = fs.existsSync(instanceExePath) ? instanceExePath : config.terminalExePath;
+  const winTargetExe = config.isWine
+    ? `Z:${targetExe.replace(/\//g, "\\")}`
+    : targetExe;
+
   // 3. Write transient account.ini with strict 0600 file permissions
   const accountIniPath = path.join(instanceDir, "account.ini");
   const safePassword = decryptedPassword || "";
@@ -187,11 +229,10 @@ WebRequestUrl=${config.backendBaseUrl},http://localhost:3000,http://127.0.0.1:30
 
   if (config.isWine) {
     const wineBin = config.wineBinPath || "wine";
-    const terminalExe = config.terminalExePath;
 
     const spawnEnv = {
       ...process.env,
-      DISPLAY: process.env.DISPLAY || ":99",
+      DISPLAY: process.env.DISPLAY || ":10.0",
       WINEPREFIX: config.winePrefix || "",
       WINEDEBUG: "-all", // Suppress noisy Wine debug logs
     };
@@ -202,8 +243,8 @@ WebRequestUrl=${config.backendBaseUrl},http://localhost:3000,http://127.0.0.1:30
     const isMacArm64 = process.platform === "darwin" && process.arch === "arm64";
     const spawnBin = isMacArm64 ? "/usr/bin/arch" : wineBin;
     const spawnArgs = isMacArm64
-      ? ["-x86_64", wineBin, terminalExe, "/portable", `/config:${winAccountIniPath}`]
-      : [terminalExe, "/portable", `/config:${winAccountIniPath}`];
+      ? ["-x86_64", wineBin, winTargetExe, "/portable", `/config:${winAccountIniPath}`]
+      : [winTargetExe, "/portable", `/config:${winAccountIniPath}`];
 
     child = spawn(
       spawnBin,
@@ -218,7 +259,7 @@ WebRequestUrl=${config.backendBaseUrl},http://localhost:3000,http://127.0.0.1:30
   } else {
     // Windows Native
     child = spawn(
-      config.terminalExePath,
+      targetExe,
       ["/portable", `/config:${accountIniPath}`],
       {
         cwd: instanceDir,

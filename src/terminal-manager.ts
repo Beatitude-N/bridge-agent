@@ -148,14 +148,7 @@ export class TerminalManager {
 
       // Handle process exit / crash
       spawned.process.on("exit", (code, signal) => {
-        console.log(`[BridgeAgent] Terminal launcher for account ${spawned.accountNumber} exited with code: ${code}`);
-
-        // Check if an MT5 terminal process is actively running on the host system
-        const isRunning = isSystemTerminalRunning();
-        if (isRunning && (code === 0 || code === null)) {
-          console.log(`[BridgeAgent] MT5 terminal process is active on host for account ${spawned.accountNumber}. Maintaining session.`);
-          return;
-        }
+        console.log(`[BridgeAgent] Terminal process for account ${spawned.accountNumber} exited with code: ${code}`);
 
         this.instances.delete(account.id);
         this.reportStatus(account.id, {
