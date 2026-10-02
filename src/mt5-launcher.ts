@@ -75,15 +75,21 @@ fixed_height=-1
 </indicator>
 
 <expert>
-name=BFX\\BfxBridge
-flags=339
-window_num=0
+name=BfxBridge
+path=Experts\\BFX\\BfxBridge.ex5
+expertmode=5
 <inputs>
+=== BfxBridge Server Settings ====
 InpServerUrl=${backendUrl}
 InpAccountId=${accountId}
+=== Order Execution Type Settings ====
+InpExecMode=0
+InpPendingExpiryMins=0
+=== Execution & Polling Settings ====
 InpMagicNumber=20260904
-InpPollInterval=5
-InpHeartbeatInterval=60
+InpLongPolling=true
+InpPollInterval=1
+InpHeartbeatInterval=30
 InpDeviation=20
 </inputs>
 </expert>
@@ -129,33 +135,34 @@ export async function launchMt5Terminal(
     // Best-effort copy
   }
 
-  // 1. Write UTF-16LE common.ini with WebRequest enabled
+  // 1. Copy common.ini from mt5_cache or base so encrypted WebRequestUrl and Expert settings are preserved
   const commonIniPath = path.join(configDir, "common.ini");
-  const commonIniContent = `[Common]\r\nLogin=0\r\n\r\n[Experts]\r\nAllowDllImport=1\r\nEnabled=1\r\nAccount=0\r\nProfile=0\r\nChart=0\r\nWebRequest=1\r\nWebRequestUrl=${config.backendBaseUrl},http://localhost:3000,http://127.0.0.1:3000\r\n`;
-  fs.writeFileSync(commonIniPath, Buffer.from(commonIniContent, "utf16le"));
+  const baseTerminalDir = path.dirname(config.terminalExePath);
+  const baseConfigDir = path.join(baseTerminalDir, "config");
+  const cacheCommonIni = path.join(__dirname, "..", "mt5_cache", "config", "common.ini");
+  const baseCommonIni = path.join(baseConfigDir, "common.ini");
+
+  if (fs.existsSync(cacheCommonIni)) {
+    fs.copyFileSync(cacheCommonIni, commonIniPath);
+  } else if (fs.existsSync(baseCommonIni)) {
+    fs.copyFileSync(baseCommonIni, commonIniPath);
+  }
 
   // 2. Write UTF-16LE chart file with auto-loaded EA
   const chartBuffer = buildDefaultChartBuffer(config.backendBaseUrl, account.id);
   const chartPath = path.join(chartsDir, "chart01.chr");
   fs.writeFileSync(chartPath, chartBuffer);
 
-  // Also write chart file and common.ini to base MT5 profile so portable mode loads it automatically
+  // Also write chart file to base MT5 profile
   try {
-    const baseTerminalDir = path.dirname(config.terminalExePath);
     const baseChartsDir = path.join(baseTerminalDir, "MQL5", "Profiles", "Charts", "Default");
     fs.mkdirSync(baseChartsDir, { recursive: true });
     fs.writeFileSync(path.join(baseChartsDir, "chart01.chr"), chartBuffer);
-
-    const baseConfigDir = path.join(baseTerminalDir, "config");
-    fs.mkdirSync(baseConfigDir, { recursive: true });
-    fs.writeFileSync(path.join(baseConfigDir, "common.ini"), Buffer.from(commonIniContent, "utf16le"));
   } catch {
     // Best-effort copy to base
   }
 
   // Copy network cache (servers.dat, dnsperf.dat) into instance config so broker discovery is instant
-  const baseTerminalDir = path.dirname(config.terminalExePath);
-  const baseConfigDir = path.join(baseTerminalDir, "config");
   if (fs.existsSync(baseConfigDir)) {
     for (const f of ["servers.dat", "dnsperf.dat"]) {
       const src = path.join(baseConfigDir, f);
