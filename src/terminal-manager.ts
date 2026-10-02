@@ -156,7 +156,11 @@ export class TerminalManager {
 
       // Handle process exit / crash
       spawned.process.on("exit", (code, signal) => {
-        console.log(`[BridgeAgent] Terminal process for account ${spawned.accountNumber} exited with code: ${code}`);
+        const exitMsg = code === 0
+          ? `Terminal closed normally (code 0).`
+          : `Terminal disconnected unexpectedly (exit code ${code}${signal ? `, signal: ${signal}` : ""}). Verify login #${account.accountNumber} on server '${account.server}'.`;
+
+        console.log(`[BridgeAgent] Terminal process for account ${spawned.accountNumber} exited: ${exitMsg}`);
 
         this.instances.delete(account.id);
         this.reportStatus(account.id, {
@@ -164,7 +168,7 @@ export class TerminalManager {
           terminalStatus: "OFFLINE",
           eaStatus: "OFFLINE",
           terminalPid: null,
-          errorMessage: `Terminal exited with code ${code}`,
+          errorMessage: exitMsg,
         }).catch(() => {});
       });
 
@@ -177,12 +181,13 @@ export class TerminalManager {
 
       console.log(`[BridgeAgent] Terminal instance launched for ${account.accountNumber}. PID: ${spawned.pid}`);
     } catch (err: any) {
-      console.error(`[BridgeAgent] Failed to start terminal for ${account.accountNumber}:`, err);
+      const launchErrMsg = `Failed to launch MT5 process for #${account.accountNumber}: ${err?.message || "Unknown error"}`;
+      console.error(`[BridgeAgent] ${launchErrMsg}`, err);
       await this.reportStatus(account.id, {
         connectionStatus: "TERMINAL_ERROR",
         terminalStatus: "OFFLINE",
         eaStatus: "OFFLINE",
-        errorMessage: err?.message || "Failed to launch MT5 process.",
+        errorMessage: launchErrMsg,
       });
     }
   }
