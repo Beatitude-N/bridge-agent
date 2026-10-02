@@ -21,6 +21,7 @@ function isSystemTerminalRunning(): boolean {
 export class TerminalManager {
   private config: AgentConfig;
   private instances: Map<string, SpawnedTerminal> = new Map();
+  private launchCooldowns: Map<string, number> = new Map();
   private isRunning: boolean = false;
   private pollTimer: ReturnType<typeof setInterval> | null = null;
 
@@ -101,8 +102,15 @@ export class TerminalManager {
       const activeAccountIds = new Set(activeAccounts.map((a) => a.id));
 
       // 1. Launch terminals for active accounts that are not yet running
+      const now = Date.now();
       for (const account of activeAccounts) {
         if (!this.instances.has(account.id)) {
+          const lastAttempt = this.launchCooldowns.get(account.id) || 0;
+          if (now - lastAttempt < 30000) {
+            // Prevent rapid restart loop
+            continue;
+          }
+          this.launchCooldowns.set(account.id, now);
           await this.startInstance(account);
         }
       }

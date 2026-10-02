@@ -270,7 +270,7 @@ WebRequestUrl=${config.backendBaseUrl},http://localhost:3000,http://127.0.0.1:30
   }
 
   // 4. RULE: Ephemeral Password Wipe
-  // Overwrite the password field in account.ini after MT5 has ingested it (after 5 seconds)
+  // Overwrite the password field in account.ini after MT5 has finished handshaking (after 60 seconds)
   setTimeout(() => {
     try {
       if (fs.existsSync(accountIniPath)) {
@@ -296,7 +296,7 @@ WebRequestUrl=${config.backendBaseUrl},http://localhost:3000,http://127.0.0.1:30
     } catch {
       // Best-effort overwrite
     }
-  }, 5000);
+  }, 60000);
 
   return {
     accountId: account.id,
