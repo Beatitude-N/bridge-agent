@@ -212,6 +212,11 @@ Password=${safePassword}
 Server=${account.server}
 EnableNews=0
 
+[StartUp]
+Expert=BFX\\BfxBridge.ex5
+Symbol=EURUSD
+Period=H1
+
 [Charts]
 ProfileLast=Default
 
@@ -220,8 +225,6 @@ AllowDll=1
 Enabled=1
 Account=0
 Profile=0
-WebRequest=1
-WebRequestUrl=${config.backendBaseUrl},http://localhost:3000,http://127.0.0.1:3000
 `;
 
   fs.writeFileSync(accountIniPath, initialIniContent, { mode: 0o600 });
