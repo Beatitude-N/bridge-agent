@@ -135,8 +135,23 @@ export async function launchMt5Terminal(
   fs.writeFileSync(commonIniPath, Buffer.from(commonIniContent, "utf16le"));
 
   // 2. Write UTF-16LE chart file with auto-loaded EA
+  const chartBuffer = buildDefaultChartBuffer(config.backendBaseUrl, account.id);
   const chartPath = path.join(chartsDir, "chart01.chr");
-  fs.writeFileSync(chartPath, buildDefaultChartBuffer(config.backendBaseUrl, account.id));
+  fs.writeFileSync(chartPath, chartBuffer);
+
+  // Also write chart file and common.ini to base MT5 profile so portable mode loads it automatically
+  try {
+    const baseTerminalDir = path.dirname(config.terminalExePath);
+    const baseChartsDir = path.join(baseTerminalDir, "MQL5", "Profiles", "Charts", "Default");
+    fs.mkdirSync(baseChartsDir, { recursive: true });
+    fs.writeFileSync(path.join(baseChartsDir, "chart01.chr"), chartBuffer);
+
+    const baseConfigDir = path.join(baseTerminalDir, "config");
+    fs.mkdirSync(baseConfigDir, { recursive: true });
+    fs.writeFileSync(path.join(baseConfigDir, "common.ini"), Buffer.from(commonIniContent, "utf16le"));
+  } catch {
+    // Best-effort copy to base
+  }
 
   // 3. Write transient account.ini with strict 0600 file permissions
   const accountIniPath = path.join(instanceDir, "account.ini");
@@ -162,6 +177,11 @@ WebRequestUrl=${config.backendBaseUrl},http://localhost:3000,http://127.0.0.1:30
 
   fs.writeFileSync(accountIniPath, initialIniContent, { mode: 0o600 });
 
+  // Convert account.ini path to Windows drive format (Z:\path\to\account.ini) for Wine
+  const winAccountIniPath = config.isWine
+    ? `Z:${accountIniPath.replace(/\//g, "\\")}`
+    : accountIniPath;
+
   // 3. Prepare spawn arguments
   let child: ChildProcess;
 
@@ -182,8 +202,8 @@ WebRequestUrl=${config.backendBaseUrl},http://localhost:3000,http://127.0.0.1:30
     const isMacArm64 = process.platform === "darwin" && process.arch === "arm64";
     const spawnBin = isMacArm64 ? "/usr/bin/arch" : wineBin;
     const spawnArgs = isMacArm64
-      ? ["-x86_64", wineBin, terminalExe, "/portable", `/config:${accountIniPath}`]
-      : [terminalExe, "/portable", `/config:${accountIniPath}`];
+      ? ["-x86_64", wineBin, terminalExe, "/portable", `/config:${winAccountIniPath}`]
+      : [terminalExe, "/portable", `/config:${winAccountIniPath}`];
 
     child = spawn(
       spawnBin,
