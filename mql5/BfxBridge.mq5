@@ -43,6 +43,131 @@ datetime       m_lastHeartbeatTime     = 0;
 bool           m_isConnected           = false;
 string         m_autoResolvedAccountId = "";
 
+//--- WinINet API Declarations (Zero-Whitelist Native Windows HTTP)
+#import "wininet.dll"
+long InternetOpenW(string lpszAgent, int dwAccessType, string lpszProxy, string lpszProxyBypass, int dwFlags);
+long InternetConnectW(long hInternet, string lpszServerName, int nServerPort, string lpszUsername, string lpszPassword, int dwService, int dwFlags, int dwContext);
+long HttpOpenRequestW(long hConnect, string lpszVerb, string lpszObjectName, string lpszVersion, string lpszReferrer, long lpszAcceptTypes, int dwFlags, int dwContext);
+bool HttpSendRequestW(long hRequest, string lpszHeaders, int dwHeadersLength, const char &lpOptional[], int dwOptionalLength);
+bool InternetReadFile(long hFile, char &lpBuffer[], int dwNumberOfBytesToRead, int &lpdwNumberOfBytesRead);
+bool InternetCloseHandle(long hInternet);
+#import
+
+#define INTERNET_OPEN_TYPE_DIRECT               1
+#define INTERNET_SERVICE_HTTP                   3
+#define INTERNET_FLAG_RELOAD                    0x80000000
+#define INTERNET_FLAG_NO_CACHE_WRITE            0x04000000
+#define INTERNET_FLAG_SECURE                    0x00800000
+#define INTERNET_FLAG_IGNORE_CERT_CN_INVALID    0x00001000
+#define INTERNET_FLAG_IGNORE_CERT_DATE_INVALID  0x00002000
+#define INTERNET_FLAG_PRAGMA_NOCACHE            0x00000100
+
+//+------------------------------------------------------------------+
+//| Native WinInet HTTP Implementation (Bypasses WebRequest whitelist)|
+//+------------------------------------------------------------------+
+int WinInetHttpRequest(
+   string      method,
+   string      url,
+   string      headers,
+   int         timeoutMs,
+   const char &postData[],
+   char       &resultData[],
+   string     &resultHeaders
+)
+{
+   bool isHttps = (StringFind(url, "https://") == 0);
+   int defaultPort = isHttps ? 443 : 80;
+   int prefixLen = isHttps ? 8 : 7;
+   
+   string rest = StringSubstr(url, prefixLen);
+   int slashPos = StringFind(rest, "/");
+   string serverName = (slashPos >= 0) ? StringSubstr(rest, 0, slashPos) : rest;
+   string objectPath = (slashPos >= 0) ? StringSubstr(rest, slashPos) : "/";
+   
+   int port = defaultPort;
+   int colonPos = StringFind(serverName, ":");
+   if(colonPos >= 0)
+   {
+      port = (int)StringToInteger(StringSubstr(serverName, colonPos + 1));
+      serverName = StringSubstr(serverName, 0, colonPos);
+   }
+
+   long hInternet = InternetOpenW("BfxBridge/1.2", INTERNET_OPEN_TYPE_DIRECT, NULL, NULL, 0);
+   if(hInternet == 0) return -1;
+
+   long hConnect = InternetConnectW(hInternet, serverName, port, NULL, NULL, INTERNET_SERVICE_HTTP, 0, 0);
+   if(hConnect == 0)
+   {
+      InternetCloseHandle(hInternet);
+      return -1;
+   }
+
+   int reqFlags = INTERNET_FLAG_RELOAD | INTERNET_FLAG_NO_CACHE_WRITE | INTERNET_FLAG_PRAGMA_NOCACHE;
+   if(isHttps)
+   {
+      reqFlags |= (INTERNET_FLAG_SECURE | INTERNET_FLAG_IGNORE_CERT_CN_INVALID | INTERNET_FLAG_IGNORE_CERT_DATE_INVALID);
+   }
+
+   long hRequest = HttpOpenRequestW(hConnect, method, objectPath, NULL, NULL, 0, reqFlags, 0);
+   if(hRequest == 0)
+   {
+      InternetCloseHandle(hConnect);
+      InternetCloseHandle(hInternet);
+      return -1;
+   }
+
+   int postSize = ArraySize(postData);
+   bool sendOk = HttpSendRequestW(hRequest, headers, StringLen(headers), postData, postSize);
+   if(!sendOk)
+   {
+      InternetCloseHandle(hRequest);
+      InternetCloseHandle(hConnect);
+      InternetCloseHandle(hInternet);
+      return -1;
+   }
+
+   char chunk[4096];
+   int bytesRead = 0;
+   ArrayResize(resultData, 0);
+
+   while(InternetReadFile(hRequest, chunk, 4096, bytesRead) && bytesRead > 0)
+   {
+      int cur = ArraySize(resultData);
+      ArrayResize(resultData, cur + bytesRead);
+      ArrayCopy(resultData, chunk, cur, 0, bytesRead);
+   }
+
+   InternetCloseHandle(hRequest);
+   InternetCloseHandle(hConnect);
+   InternetCloseHandle(hInternet);
+
+   return 200;
+}
+
+//+------------------------------------------------------------------+
+//| Universal HTTP Request Dispatcher                                |
+//+------------------------------------------------------------------+
+int SendHttpRequest(
+   string      method,
+   string      url,
+   string      headers,
+   int         timeoutMs,
+   const char &postData[],
+   char       &resultData[],
+   string     &resultHeaders
+)
+{
+   if(TerminalInfoInteger(TERMINAL_DLLS_ALLOWED))
+   {
+      int winRes = WinInetHttpRequest(method, url, headers, timeoutMs, postData, resultData, resultHeaders);
+      if(winRes == 200)
+         return 200;
+   }
+
+   ResetLastError();
+   return WebRequest(method, url, headers, timeoutMs, postData, resultData, resultHeaders);
+}
+
 // Duplicate Execution Protection Cache
 #define MAX_CACHED_EXEC_IDS 256
 string         m_processedExecutionIds[MAX_CACHED_EXEC_IDS];
@@ -252,7 +377,7 @@ void SendHeartbeat()
    ArrayResize(postData, ArraySize(postData) - 1); // remove null terminator
    
    ResetLastError();
-   int res = WebRequest("POST", url, headers, 3000, postData, resultData, resultHeaders);
+   int res = SendHttpRequest("POST", url, headers, 3000, postData, resultData, resultHeaders);
    
    if(res == 200)
    {
@@ -320,7 +445,7 @@ void PollPendingCommands()
    int requestTimeout = InpLongPolling ? 15000 : 3000;
    
    ResetLastError();
-   int res = WebRequest("GET", url, headers, requestTimeout, postData, resultData, resultHeaders);
+   int res = SendHttpRequest("GET", url, headers, requestTimeout, postData, resultData, resultHeaders);
    
    isPollingActive = false;
    
@@ -1175,7 +1300,7 @@ void SendExecutionReport(
    ArrayResize(postData, ArraySize(postData) - 1);
    
    ResetLastError();
-   int res = WebRequest("POST", url, headers, 3000, postData, resultData, resultHeaders);
+   int res = SendHttpRequest("POST", url, headers, 3000, postData, resultData, resultHeaders);
    
    if(res == 200)
    {
@@ -1221,7 +1346,7 @@ void SendModificationReport(
    ArrayResize(postData, ArraySize(postData) - 1);
    
    ResetLastError();
-   WebRequest("POST", url, headers, 3000, postData, resultData, resultHeaders);
+   SendHttpRequest("POST", url, headers, 3000, postData, resultData, resultHeaders);
 }
 
 //+------------------------------------------------------------------+

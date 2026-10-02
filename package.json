@@ -5,7 +5,8 @@
   "main": "src/index.ts",
   "scripts": {
     "start": "tsx src/index.ts",
-    "build": "tsc"
+    "build": "tsc",
+    "compile-ea": "wine \"/root/.wine/drive_c/Program Files/MetaTrader 5/metaeditor64.exe\" /compile:\"mql5/BfxBridge.mq5\" /log"
   },
   "dependencies": {
     "tsx": "^4.23.13"
