@@ -1,0 +1,26 @@
+{
+  "name": "bfxbridge-agent",
+  "version": "1.0.0",
+  "description": "Autonomous MT5 Terminal Manager and Bridge Agent for BfxBridge",
+  "main": "src/index.ts",
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "build": "tsc"
+  },
+  "dependencies": {
+    "tsx": "^4.23.13"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.0.0"
+  },
+  "keywords": [
+    "mt5",
+    "metatrader",
+    "bridge",
+    "tradingview",
+    "trading"
+  ],
+  "author": "BfxBridge Technologies",
+  "license": "UNLICENSED"
+}
