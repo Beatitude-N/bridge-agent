@@ -227,15 +227,37 @@ export async function launchMt5Terminal(
     } catch {}
   }
 
-  // Copy Templates directory (including default.tpl with BfxBridge) into instance MQL5
+  // Copy Templates directory into instance MQL5, and ensure default.tpl has BfxBridge auto-attached
   const baseTemplatesDir = path.join(baseTerminalDir, "MQL5", "Profiles", "Templates");
   const instanceTemplatesDir = path.join(instanceDir, "MQL5", "Profiles", "Templates");
   fs.mkdirSync(instanceTemplatesDir, { recursive: true });
+  fs.mkdirSync(baseTemplatesDir, { recursive: true });
   if (fs.existsSync(baseTemplatesDir)) {
     try {
       fs.cpSync(baseTemplatesDir, instanceTemplatesDir, { recursive: true });
     } catch {}
   }
+
+  // Write default.tpl with BfxBridge so ANY opened chart auto-attaches BfxBridge
+  const tplBuffer = buildDefaultChartBuffer(config.backendBaseUrl, account.id, targetSymbol);
+  try {
+    fs.writeFileSync(path.join(instanceTemplatesDir, "default.tpl"), tplBuffer);
+    fs.writeFileSync(path.join(baseTemplatesDir, "default.tpl"), tplBuffer);
+  } catch {}
+
+  // Also ensure BfxBridge.ex5 exists in both MQL5/Experts and MQL5/Experts/BFX
+  try {
+    const rootExpertsDir = path.join(instanceDir, "MQL5", "Experts");
+    const baseRootExperts = path.join(baseTerminalDir, "MQL5", "Experts");
+    const localEx5 = path.join(expertsDir, "BfxBridge.ex5");
+    if (fs.existsSync(localEx5)) {
+      fs.copyFileSync(localEx5, path.join(rootExpertsDir, "BfxBridge.ex5"));
+      fs.copyFileSync(localEx5, path.join(baseRootExperts, "BfxBridge.ex5"));
+      const baseBfxDir = path.join(baseRootExperts, "BFX");
+      fs.mkdirSync(baseBfxDir, { recursive: true });
+      fs.copyFileSync(localEx5, path.join(baseBfxDir, "BfxBridge.ex5"));
+    }
+  } catch {}
 
   // RULE: MT5 forbids multiple instances running out of the same directory in portable mode.
   // We hardlink/copy terminal64.exe directly into instanceDir so each account has its own isolated executable root.
