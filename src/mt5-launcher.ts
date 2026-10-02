@@ -15,15 +15,26 @@ export interface SpawnedTerminal {
 }
 
 /**
+ * Helper to encode strings into UTF-16LE with Windows Byte Order Mark (0xFF 0xFE) and CRLF.
+ * MT5 strictly requires BOM and CRLF for .chr, .tpl, and .set files.
+ */
+function toUtf16LeWithBom(str: string): Buffer {
+  const crlfStr = str.replace(/\r?\n/g, "\r\n");
+  const bom = Buffer.from([0xff, 0xfe]);
+  const body = Buffer.from(crlfStr, "utf16le");
+  return Buffer.concat([bom, body]);
+}
+
+/**
  * Builds UTF-16LE chart file with auto-attached BfxBridge EA.
  */
 function buildDefaultChartBuffer(backendUrl: string, accountId: string, symbol: string = "XAUUSD"): Buffer {
   const chartContent =
-    `<chart>
+`<chart>
 id=134329884593686340
 symbol=${symbol}
 description=${symbol}
-period_type=0
+period_type=1
 period_size=1
 digits=2
 tick_size=0.000000
@@ -76,7 +87,7 @@ fixed_height=-1
 
 <expert>
 name=BfxBridge
-path=Experts\\BFX\\BfxBridge.ex5
+path=Experts\\BfxBridge.ex5
 expertmode=5
 <inputs>
 === BfxBridge Server Settings ====
@@ -97,15 +108,35 @@ InpDeviation=20
 </chart>
 `;
 
-  return Buffer.from(chartContent, "utf16le");
+  return toUtf16LeWithBom(chartContent);
+}
+
+/**
+ * Builds UTF-16LE BfxBridge.set preset file for MT5 [StartUp] ExpertParameters.
+ */
+function buildExpertParamsBuffer(backendUrl: string, accountId: string): Buffer {
+  const content =
+    `InpServerUrl=${backendUrl}\r\n` +
+    `InpAccountId=${accountId}\r\n` +
+    `InpExecMode=0\r\n` +
+    `InpPendingExpiryMins=0\r\n` +
+    `InpMagicNumber=20260904\r\n` +
+    `InpLongPolling=true\r\n` +
+    `InpPollInterval=1\r\n` +
+    `InpHeartbeatInterval=30\r\n` +
+    `InpDeviation=20\r\n`;
+
+  return toUtf16LeWithBom(content);
 }
 
 function normalizeSymbolCase(raw: string): string {
   const s = raw.trim();
   if (!s) return "XAUUSD";
   const upper = s.toUpperCase();
+  if (upper === "GOLD") return "GOLD";
   if (upper.endsWith(".PRO")) return upper.slice(0, -4) + ".pro";
   if (upper.endsWith(".RAW")) return upper.slice(0, -4) + ".raw";
+  if (upper.endsWith("+")) return upper;
   if (upper.endsWith("M") && !upper.startsWith("M")) return upper.slice(0, -1) + "m";
   if (upper.endsWith("Z") && !upper.startsWith("Z")) return upper.slice(0, -1) + "z";
   if (upper.endsWith("C") && !upper.startsWith("C") && upper !== "USDC") return upper.slice(0, -1) + "c";
@@ -123,18 +154,31 @@ export async function launchMt5Terminal(
   const instanceDir = path.join(config.instancesDir, account.id);
   const chartsDir = path.join(instanceDir, "MQL5", "Profiles", "Charts", "Default");
   const expertsDir = path.join(instanceDir, "MQL5", "Experts", "BFX");
+  const presetsDir = path.join(instanceDir, "MQL5", "Presets");
   const configDir = path.join(instanceDir, "config");
+  const baseTerminalDir = path.dirname(config.terminalExePath);
+  const basePresetsDir = path.join(baseTerminalDir, "MQL5", "Presets");
 
   fs.mkdirSync(chartsDir, { recursive: true });
   fs.mkdirSync(expertsDir, { recursive: true });
+  fs.mkdirSync(presetsDir, { recursive: true });
+  fs.mkdirSync(basePresetsDir, { recursive: true });
   fs.mkdirSync(configDir, { recursive: true });
 
   // Resolve target symbol (Gold default: XAUUSD, XAUUSDz, XAUUSDm, etc.)
+  const accHint = `${account.accountName || ""} ${account.server || ""} ${account.broker || ""}`.toLowerCase();
   let targetSymbol = (account.tradingSymbol || "").trim();
   if (targetSymbol) {
     targetSymbol = normalizeSymbolCase(targetSymbol);
+    // If the broker is Exness and the user provided plain symbol without suffix:
+    if (accHint.includes("exness") && !targetSymbol.endsWith("m") && !targetSymbol.endsWith("z") && !targetSymbol.endsWith(".pro") && !targetSymbol.endsWith(".raw")) {
+      if (accHint.includes("zero") || accHint.includes(" 0")) {
+        targetSymbol = targetSymbol + "z";
+      } else {
+        targetSymbol = targetSymbol + "m";
+      }
+    }
   } else {
-    const accHint = `${account.accountName || ""} ${account.server || ""}`.toLowerCase();
     if (accHint.includes("zero") || accHint.includes(" 0")) {
       targetSymbol = "XAUUSDz";
     } else if (accHint.includes("cent") || accHint.includes("micro") || accHint.includes("exness")) {
@@ -144,31 +188,52 @@ export async function launchMt5Terminal(
     }
   }
 
-  // Clean up any extra/stale charts so MT5 opens strictly ONE maximized chart
+  console.log(`[Launcher] Account ${account.accountNumber} resolved target symbol: '${targetSymbol}'`);
+
+  // Deep clean any old charts across all profile directories so no stale charts (like EURUSD) linger
+  const profilesDir = path.join(instanceDir, "MQL5", "Profiles", "Charts");
   try {
-    if (fs.existsSync(chartsDir)) {
-      const files = fs.readdirSync(chartsDir);
-      for (const file of files) {
-        if (file.toLowerCase().endsWith(".chr") || file.toLowerCase().endsWith(".wnd")) {
-          fs.unlinkSync(path.join(chartsDir, file));
+    if (fs.existsSync(profilesDir)) {
+      const subdirs = fs.readdirSync(profilesDir);
+      for (const subdir of subdirs) {
+        const fullSubdir = path.join(profilesDir, subdir);
+        if (fs.statSync(fullSubdir).isDirectory()) {
+          const files = fs.readdirSync(fullSubdir);
+          for (const file of files) {
+            if (file.toLowerCase().endsWith(".chr") || file.toLowerCase().endsWith(".wnd")) {
+              fs.unlinkSync(path.join(fullSubdir, file));
+            }
+          }
         }
       }
     }
   } catch {}
 
-  // Copy compiled EA to instance experts directory
+  // Copy compiled EA to instance experts directories (both MQL5/Experts and MQL5/Experts/BFX)
+  const rootExpertsDir = path.join(instanceDir, "MQL5", "Experts");
+  const baseRootExperts = path.join(baseTerminalDir, "MQL5", "Experts");
+  const baseBfxDir = path.join(baseRootExperts, "BFX");
+  fs.mkdirSync(rootExpertsDir, { recursive: true });
+  fs.mkdirSync(baseRootExperts, { recursive: true });
+  fs.mkdirSync(baseBfxDir, { recursive: true });
+
   try {
     const localMql5Dir = path.join(__dirname, "..", "mql5", "BfxBridge.ex5");
     const cwdMql5Dir = path.join(process.cwd(), "mql5", "BfxBridge.ex5");
-    const baseTerminalDir = path.dirname(config.terminalExePath);
-    const baseBfxEx5 = path.join(baseTerminalDir, "MQL5", "Experts", "BFX", "BfxBridge.ex5");
+    const baseBfxEx5 = path.join(baseBfxDir, "BfxBridge.ex5");
+    const baseRootEx5 = path.join(baseRootExperts, "BfxBridge.ex5");
 
-    if (fs.existsSync(localMql5Dir)) {
-      fs.copyFileSync(localMql5Dir, path.join(expertsDir, "BfxBridge.ex5"));
-    } else if (fs.existsSync(cwdMql5Dir)) {
-      fs.copyFileSync(cwdMql5Dir, path.join(expertsDir, "BfxBridge.ex5"));
-    } else if (fs.existsSync(baseBfxEx5)) {
-      fs.copyFileSync(baseBfxEx5, path.join(expertsDir, "BfxBridge.ex5"));
+    let sourceEx5: string | null = null;
+    if (fs.existsSync(localMql5Dir)) sourceEx5 = localMql5Dir;
+    else if (fs.existsSync(cwdMql5Dir)) sourceEx5 = cwdMql5Dir;
+    else if (fs.existsSync(baseBfxEx5)) sourceEx5 = baseBfxEx5;
+    else if (fs.existsSync(baseRootEx5)) sourceEx5 = baseRootEx5;
+
+    if (sourceEx5) {
+      fs.copyFileSync(sourceEx5, path.join(expertsDir, "BfxBridge.ex5"));
+      fs.copyFileSync(sourceEx5, path.join(rootExpertsDir, "BfxBridge.ex5"));
+      fs.copyFileSync(sourceEx5, path.join(baseBfxDir, "BfxBridge.ex5"));
+      fs.copyFileSync(sourceEx5, path.join(baseRootExperts, "BfxBridge.ex5"));
     }
   } catch {
     // Best-effort copy
@@ -176,7 +241,6 @@ export async function launchMt5Terminal(
 
   // 1. Copy common.ini from mt5_cache or base so encrypted WebRequestUrl and Expert settings are preserved
   const commonIniPath = path.join(configDir, "common.ini");
-  const baseTerminalDir = path.dirname(config.terminalExePath);
   const baseConfigDir = path.join(baseTerminalDir, "config");
   const cacheCommonIni = path.join(__dirname, "..", "mt5_cache", "config", "common.ini");
   const baseCommonIni = path.join(baseConfigDir, "common.ini");
@@ -187,7 +251,13 @@ export async function launchMt5Terminal(
     fs.copyFileSync(baseCommonIni, commonIniPath);
   }
 
-  // 2. Write single UTF-16LE chart file with auto-loaded EA for the target Gold symbol
+  // 2. Write BfxBridge.set preset file for MT5 [StartUp] ExpertParameters
+  const setBuffer = buildExpertParamsBuffer(config.backendBaseUrl, account.id);
+  fs.writeFileSync(path.join(presetsDir, "BfxBridge.set"), setBuffer);
+  fs.writeFileSync(path.join(instanceDir, "BfxBridge.set"), setBuffer);
+  fs.writeFileSync(path.join(basePresetsDir, "BfxBridge.set"), setBuffer);
+
+  // 3. Write single UTF-16LE chart file with auto-loaded EA for the target Gold symbol
   const chartBuffer = buildDefaultChartBuffer(config.backendBaseUrl, account.id, targetSymbol);
   const chartPath = path.join(chartsDir, "chart01.chr");
   fs.writeFileSync(chartPath, chartBuffer);
@@ -245,20 +315,6 @@ export async function launchMt5Terminal(
     fs.writeFileSync(path.join(baseTemplatesDir, "default.tpl"), tplBuffer);
   } catch {}
 
-  // Also ensure BfxBridge.ex5 exists in both MQL5/Experts and MQL5/Experts/BFX
-  try {
-    const rootExpertsDir = path.join(instanceDir, "MQL5", "Experts");
-    const baseRootExperts = path.join(baseTerminalDir, "MQL5", "Experts");
-    const localEx5 = path.join(expertsDir, "BfxBridge.ex5");
-    if (fs.existsSync(localEx5)) {
-      fs.copyFileSync(localEx5, path.join(rootExpertsDir, "BfxBridge.ex5"));
-      fs.copyFileSync(localEx5, path.join(baseRootExperts, "BfxBridge.ex5"));
-      const baseBfxDir = path.join(baseRootExperts, "BFX");
-      fs.mkdirSync(baseBfxDir, { recursive: true });
-      fs.copyFileSync(localEx5, path.join(baseBfxDir, "BfxBridge.ex5"));
-    }
-  } catch {}
-
   // RULE: MT5 forbids multiple instances running out of the same directory in portable mode.
   // We hardlink/copy terminal64.exe directly into instanceDir so each account has its own isolated executable root.
   const instanceExePath = path.join(instanceDir, "terminal64.exe");
@@ -279,7 +335,7 @@ export async function launchMt5Terminal(
     ? `Z:${targetExe.replace(/\//g, "\\")}`
     : targetExe;
 
-  // 3. Write transient account.ini with strict 0600 file permissions
+  // 4. Write transient account.ini with strict 0600 file permissions and native [StartUp]
   const accountIniPath = path.join(instanceDir, "account.ini");
   const safePassword = decryptedPassword || "";
 
@@ -289,8 +345,11 @@ Password=${safePassword}
 Server=${account.server}
 EnableNews=0
 
-[Charts]
-ProfileLast=Default
+[StartUp]
+Symbol=${targetSymbol}
+Period=H1
+Expert=BfxBridge.ex5
+ExpertParameters=BfxBridge.set
 
 [Experts]
 AllowDll=1
