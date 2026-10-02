@@ -182,6 +182,16 @@ export async function launchMt5Terminal(
     } catch {}
   }
 
+  // Copy Templates directory (including default.tpl with BfxBridge) into instance MQL5
+  const baseTemplatesDir = path.join(baseTerminalDir, "MQL5", "Profiles", "Templates");
+  const instanceTemplatesDir = path.join(instanceDir, "MQL5", "Profiles", "Templates");
+  fs.mkdirSync(instanceTemplatesDir, { recursive: true });
+  if (fs.existsSync(baseTemplatesDir)) {
+    try {
+      fs.cpSync(baseTemplatesDir, instanceTemplatesDir, { recursive: true });
+    } catch {}
+  }
+
   // RULE: MT5 forbids multiple instances running out of the same directory in portable mode.
   // We hardlink/copy terminal64.exe directly into instanceDir so each account has its own isolated executable root.
   const instanceExePath = path.join(instanceDir, "terminal64.exe");
