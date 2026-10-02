@@ -17,15 +17,15 @@ export interface SpawnedTerminal {
 /**
  * Builds UTF-16LE chart file with auto-attached BfxBridge EA.
  */
-function buildDefaultChartBuffer(backendUrl: string, accountId: string): Buffer {
+function buildDefaultChartBuffer(backendUrl: string, accountId: string, symbol: string = "XAUUSD"): Buffer {
   const chartContent =
     `<chart>
 id=134329884593686340
-symbol=EURUSD
-description=Euro vs US Dollar
+symbol=${symbol}
+description=${symbol}
 period_type=0
 period_size=1
-digits=3
+digits=2
 tick_size=0.000000
 scale_fix=0
 scale=16
@@ -48,9 +48,9 @@ tradelines=1
 tradehistory=0
 window_left=0
 window_top=0
-window_right=1200
-window_bottom=800
-window_type=1
+window_right=1920
+window_bottom=1080
+window_type=3
 windows_total=1
 
 <window>
@@ -117,6 +117,31 @@ export async function launchMt5Terminal(
   fs.mkdirSync(expertsDir, { recursive: true });
   fs.mkdirSync(configDir, { recursive: true });
 
+  // Resolve target symbol (Gold default: XAUUSD, XAUUSDz, XAUUSDm, etc.)
+  let targetSymbol = (account.tradingSymbol || "").trim().toUpperCase();
+  if (!targetSymbol) {
+    const accHint = `${account.accountName || ""} ${account.server || ""}`.toLowerCase();
+    if (accHint.includes("zero") || accHint.includes(" 0")) {
+      targetSymbol = "XAUUSDz";
+    } else if (accHint.includes("cent") || accHint.includes("micro")) {
+      targetSymbol = "XAUUSDm";
+    } else {
+      targetSymbol = "XAUUSD";
+    }
+  }
+
+  // Clean up any extra/stale charts so MT5 opens strictly ONE maximized chart
+  try {
+    if (fs.existsSync(chartsDir)) {
+      const files = fs.readdirSync(chartsDir);
+      for (const file of files) {
+        if (file.toLowerCase().endsWith(".chr")) {
+          fs.unlinkSync(path.join(chartsDir, file));
+        }
+      }
+    }
+  } catch {}
+
   // Copy compiled EA to instance experts directory
   try {
     const localMql5Dir = path.join(__dirname, "..", "mql5", "BfxBridge.ex5");
@@ -148,15 +173,21 @@ export async function launchMt5Terminal(
     fs.copyFileSync(baseCommonIni, commonIniPath);
   }
 
-  // 2. Write UTF-16LE chart file with auto-loaded EA
-  const chartBuffer = buildDefaultChartBuffer(config.backendBaseUrl, account.id);
+  // 2. Write single UTF-16LE chart file with auto-loaded EA for the target Gold symbol
+  const chartBuffer = buildDefaultChartBuffer(config.backendBaseUrl, account.id, targetSymbol);
   const chartPath = path.join(chartsDir, "chart01.chr");
   fs.writeFileSync(chartPath, chartBuffer);
 
-  // Also write chart file to base MT5 profile
+  // Also clean and write chart file to base MT5 profile
   try {
     const baseChartsDir = path.join(baseTerminalDir, "MQL5", "Profiles", "Charts", "Default");
     fs.mkdirSync(baseChartsDir, { recursive: true });
+    const baseFiles = fs.readdirSync(baseChartsDir);
+    for (const file of baseFiles) {
+      if (file.toLowerCase().endsWith(".chr") && file !== "chart01.chr") {
+        fs.unlinkSync(path.join(baseChartsDir, file));
+      }
+    }
     fs.writeFileSync(path.join(baseChartsDir, "chart01.chr"), chartBuffer);
   } catch {
     // Best-effort copy to base

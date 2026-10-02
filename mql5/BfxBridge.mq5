@@ -206,6 +206,23 @@ int OnInit()
    m_trade.SetDeviationInPoints(InpDeviation);
    m_trade.SetTypeFilling(ORDER_FILLING_IOC);
    
+   // Check and auto-switch chart to active broker Gold symbol if current symbol has no quote
+   string currentSym = _Symbol;
+   double currentBid = SymbolInfoDouble(currentSym, SYMBOL_BID);
+   bool isSelected   = (bool)SymbolInfoInteger(currentSym, SYMBOL_SELECT);
+
+   if(currentBid <= 0.0 || !isSelected)
+   {
+      PrintFormat("BfxBridge: Current chart '%s' has no broker quote. Discovering broker Gold symbol...", currentSym);
+      string activeGold = ResolveTradableSymbol("XAUUSD");
+      if(StringLen(activeGold) > 0 && activeGold != currentSym)
+      {
+         PrintFormat("BfxBridge: Auto-switching chart to live broker Gold symbol: '%s'", activeGold);
+         SymbolSelect(activeGold, true);
+         ChartSetSymbolPeriod(0, activeGold, (ENUM_TIMEFRAMES)Period());
+      }
+   }
+   
    // Start ultra-responsive polling timer (500ms for instant execution listener)
    if(!EventSetMillisecondTimer(500))
    {

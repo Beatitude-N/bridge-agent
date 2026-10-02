@@ -13,4 +13,5 @@ export interface BridgeAgentAccountConfig {
   terminalStatus: "ONLINE" | "OFFLINE";
   eaStatus: "ONLINE" | "OFFLINE";
   algoTradingEnabled: boolean;
+  tradingSymbol?: string;
 }
