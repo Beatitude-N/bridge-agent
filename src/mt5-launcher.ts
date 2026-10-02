@@ -100,6 +100,18 @@ InpDeviation=20
   return Buffer.from(chartContent, "utf16le");
 }
 
+function normalizeSymbolCase(raw: string): string {
+  const s = raw.trim();
+  if (!s) return "XAUUSD";
+  const upper = s.toUpperCase();
+  if (upper.endsWith(".PRO")) return upper.slice(0, -4) + ".pro";
+  if (upper.endsWith(".RAW")) return upper.slice(0, -4) + ".raw";
+  if (upper.endsWith("M") && !upper.startsWith("M")) return upper.slice(0, -1) + "m";
+  if (upper.endsWith("Z") && !upper.startsWith("Z")) return upper.slice(0, -1) + "z";
+  if (upper.endsWith("C") && !upper.startsWith("C") && upper !== "USDC") return upper.slice(0, -1) + "c";
+  return upper;
+}
+
 /**
  * Provisions an isolated working directory and launches a dedicated MT5 terminal instance.
  */
@@ -118,12 +130,14 @@ export async function launchMt5Terminal(
   fs.mkdirSync(configDir, { recursive: true });
 
   // Resolve target symbol (Gold default: XAUUSD, XAUUSDz, XAUUSDm, etc.)
-  let targetSymbol = (account.tradingSymbol || "").trim().toUpperCase();
-  if (!targetSymbol) {
+  let targetSymbol = (account.tradingSymbol || "").trim();
+  if (targetSymbol) {
+    targetSymbol = normalizeSymbolCase(targetSymbol);
+  } else {
     const accHint = `${account.accountName || ""} ${account.server || ""}`.toLowerCase();
     if (accHint.includes("zero") || accHint.includes(" 0")) {
       targetSymbol = "XAUUSDz";
-    } else if (accHint.includes("cent") || accHint.includes("micro")) {
+    } else if (accHint.includes("cent") || accHint.includes("micro") || accHint.includes("exness")) {
       targetSymbol = "XAUUSDm";
     } else {
       targetSymbol = "XAUUSD";
@@ -135,7 +149,7 @@ export async function launchMt5Terminal(
     if (fs.existsSync(chartsDir)) {
       const files = fs.readdirSync(chartsDir);
       for (const file of files) {
-        if (file.toLowerCase().endsWith(".chr")) {
+        if (file.toLowerCase().endsWith(".chr") || file.toLowerCase().endsWith(".wnd")) {
           fs.unlinkSync(path.join(chartsDir, file));
         }
       }
@@ -252,11 +266,6 @@ Login=${account.accountNumber}
 Password=${safePassword}
 Server=${account.server}
 EnableNews=0
-
-[StartUp]
-Expert=BFX\\BfxBridge.ex5
-Symbol=EURUSD
-Period=H1
 
 [Charts]
 ProfileLast=Default
