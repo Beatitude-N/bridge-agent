@@ -21,8 +21,8 @@ function buildDefaultChartBuffer(backendUrl: string, accountId: string): Buffer 
   const chartContent =
     `<chart>
 id=134329884593686340
-symbol=XAUUSD
-description=Gold vs US Dollar
+symbol=EURUSD
+description=Euro vs US Dollar
 period_type=0
 period_size=1
 digits=3
