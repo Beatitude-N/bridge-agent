@@ -134,6 +134,7 @@ function normalizeSymbolCase(raw: string): string {
   if (!s) return "XAUUSD";
   const upper = s.toUpperCase();
   if (upper === "GOLD") return "GOLD";
+  if (upper === "XAUUSD") return "XAUUSD"; // Natural Gold: preserve exactly as XAUUSD
   if (upper.endsWith(".PRO")) return upper.slice(0, -4) + ".pro";
   if (upper.endsWith(".RAW")) return upper.slice(0, -4) + ".raw";
   if (upper.endsWith("+")) return upper;
@@ -165,23 +166,17 @@ export async function launchMt5Terminal(
   fs.mkdirSync(basePresetsDir, { recursive: true });
   fs.mkdirSync(configDir, { recursive: true });
 
-  // Resolve target symbol (Gold default: XAUUSD, XAUUSDz, XAUUSDm, etc.)
-  const accHint = `${account.accountName || ""} ${account.server || ""} ${account.broker || ""}`.toLowerCase();
+  // Resolve target symbol:
+  // If the user specified a tradingSymbol, respect their choice completely (no forced suffixes!)
   let targetSymbol = (account.tradingSymbol || "").trim();
   if (targetSymbol) {
     targetSymbol = normalizeSymbolCase(targetSymbol);
-    // If the broker is Exness and the user provided plain symbol without suffix:
-    if (accHint.includes("exness") && !targetSymbol.endsWith("m") && !targetSymbol.endsWith("z") && !targetSymbol.endsWith(".pro") && !targetSymbol.endsWith(".raw")) {
-      if (accHint.includes("zero") || accHint.includes(" 0")) {
-        targetSymbol = targetSymbol + "z";
-      } else {
-        targetSymbol = targetSymbol + "m";
-      }
-    }
   } else {
+    // Only if tradingSymbol was completely empty/omitted, infer sensible default:
+    const accHint = `${account.accountName || ""} ${account.server || ""} ${account.broker || ""}`.toLowerCase();
     if (accHint.includes("zero") || accHint.includes(" 0")) {
       targetSymbol = "XAUUSDz";
-    } else if (accHint.includes("cent") || accHint.includes("micro") || accHint.includes("exness")) {
+    } else if (accHint.includes("cent") || accHint.includes("micro")) {
       targetSymbol = "XAUUSDm";
     } else {
       targetSymbol = "XAUUSD";
@@ -190,7 +185,7 @@ export async function launchMt5Terminal(
 
   console.log(`[Launcher] Account ${account.accountNumber} resolved target symbol: '${targetSymbol}'`);
 
-  // Deep clean any old charts across all profile directories so no stale charts (like EURUSD) linger
+  // Deep clean any old charts across all profile directories so MT5 opens strictly ONE clean chart from [StartUp]
   const profilesDir = path.join(instanceDir, "MQL5", "Profiles", "Charts");
   try {
     if (fs.existsSync(profilesDir)) {
@@ -256,26 +251,6 @@ export async function launchMt5Terminal(
   fs.writeFileSync(path.join(presetsDir, "BfxBridge.set"), setBuffer);
   fs.writeFileSync(path.join(instanceDir, "BfxBridge.set"), setBuffer);
   fs.writeFileSync(path.join(basePresetsDir, "BfxBridge.set"), setBuffer);
-
-  // 3. Write single UTF-16LE chart file with auto-loaded EA for the target Gold symbol
-  const chartBuffer = buildDefaultChartBuffer(config.backendBaseUrl, account.id, targetSymbol);
-  const chartPath = path.join(chartsDir, "chart01.chr");
-  fs.writeFileSync(chartPath, chartBuffer);
-
-  // Also clean and write chart file to base MT5 profile
-  try {
-    const baseChartsDir = path.join(baseTerminalDir, "MQL5", "Profiles", "Charts", "Default");
-    fs.mkdirSync(baseChartsDir, { recursive: true });
-    const baseFiles = fs.readdirSync(baseChartsDir);
-    for (const file of baseFiles) {
-      if (file.toLowerCase().endsWith(".chr") && file !== "chart01.chr") {
-        fs.unlinkSync(path.join(baseChartsDir, file));
-      }
-    }
-    fs.writeFileSync(path.join(baseChartsDir, "chart01.chr"), chartBuffer);
-  } catch {
-    // Best-effort copy to base
-  }
 
   // Copy network cache (servers.dat, dnsperf.dat) into instance config so broker discovery is instant
   if (fs.existsSync(baseConfigDir)) {
