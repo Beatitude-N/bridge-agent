@@ -144,6 +144,23 @@ function normalizeSymbolCase(raw: string): string {
   return upper;
 }
 
+function getDisplayEnv(): string {
+  if (process.env.DISPLAY) return process.env.DISPLAY;
+  if (process.platform === "linux") {
+    try {
+      if (fs.existsSync("/tmp/.X11-unix")) {
+        const files = fs.readdirSync("/tmp/.X11-unix");
+        const xSockets = files.filter((f) => f.startsWith("X")).map((f) => f.slice(1));
+        if (xSockets.includes("1")) return ":1";
+        if (xSockets.includes("0")) return ":0";
+        if (xSockets.length > 0) return `:${xSockets[0]}`;
+      }
+    } catch {}
+    return ":1";
+  }
+  return ":10.0";
+}
+
 /**
  * Provisions an isolated working directory and launches a dedicated MT5 terminal instance.
  */
@@ -345,10 +362,11 @@ Profile=0
 
   if (config.isWine) {
     const wineBin = config.wineBinPath || "wine";
+    const activeDisplay = getDisplayEnv();
 
     const spawnEnv = {
       ...process.env,
-      DISPLAY: process.env.DISPLAY || ":10.0",
+      DISPLAY: activeDisplay,
       WINEPREFIX: config.winePrefix || "",
       WINEDEBUG: "-all", // Suppress noisy Wine debug logs
     };
