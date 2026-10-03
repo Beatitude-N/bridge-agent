@@ -1,6 +1,7 @@
 import fs from "fs";
 import path from "path";
 import os from "os";
+import { execSync } from "child_process";
 
 export interface AgentConfig {
   backendBaseUrl: string;
@@ -111,25 +112,56 @@ export function loadAgentConfig(): AgentConfig {
     display = process.env.DISPLAY;
   }
   if (!display && isLinux) {
+    // 1. Inspect running XFCE desktop processes for active DISPLAY
     try {
-      if (fs.existsSync("/tmp/.X11-unix")) {
-        const files = fs.readdirSync("/tmp/.X11-unix");
-        const xSockets = files
-          .filter((f) => f.startsWith("X"))
-          .map((f) => f.slice(1))
-          .filter((num) => num !== "99"); // Exclude headless Xvfb (:99)
-        if (xSockets.includes("1")) {
-          display = ":1";
-        } else if (xSockets.includes("0")) {
-          display = ":0";
-        } else if (xSockets.length > 0) {
-          display = `:${xSockets[0]}`;
+      const pidsOutput = execSync(
+        "pgrep -d, -f 'xfce4-session|xfdesktop|xfwm4|Xorg|Xvnc|Xtigervnc|x11vnc' 2>/dev/null",
+        { encoding: "utf8" }
+      ).trim();
+      if (pidsOutput) {
+        const pids = pidsOutput.split(",").map((p) => p.trim()).filter(Boolean);
+        for (const pid of pids) {
+          const environPath = `/proc/${pid}/environ`;
+          if (fs.existsSync(environPath)) {
+            const raw = fs.readFileSync(environPath, "utf8");
+            const entries = raw.split("\0");
+            for (const entry of entries) {
+              if (entry.startsWith("DISPLAY=")) {
+                const disp = entry.slice("DISPLAY=".length).trim();
+                if (disp && disp !== ":99") {
+                  display = disp;
+                  break;
+                }
+              }
+            }
+            if (display) break;
+          }
         }
       }
     } catch {}
+
+    // 2. Check /tmp/.X11-unix sockets (check :0 first as primary desktop display)
+    if (!display) {
+      try {
+        if (fs.existsSync("/tmp/.X11-unix")) {
+          const files = fs.readdirSync("/tmp/.X11-unix");
+          const xSockets = files
+            .filter((f) => f.startsWith("X"))
+            .map((f) => f.slice(1))
+            .filter((num) => num !== "99"); // Exclude headless Xvfb (:99)
+          if (xSockets.includes("0")) {
+            display = ":0";
+          } else if (xSockets.includes("1")) {
+            display = ":1";
+          } else if (xSockets.length > 0) {
+            display = `:${xSockets[0]}`;
+          }
+        }
+      } catch {}
+    }
   }
   if (!display) {
-    display = isMac ? ":10.0" : ":1";
+    display = isMac ? ":10.0" : ":0";
   }
 
   return {

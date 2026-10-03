@@ -205,12 +205,12 @@ function getDisplayEnv(config?: AgentConfig): string {
           .filter((f) => f.startsWith("X"))
           .map((f) => f.slice(1))
           .filter((num) => num !== "99"); // Never choose headless Xvfb (:99)
-        if (xSockets.includes("1")) return ":1";
         if (xSockets.includes("0")) return ":0";
+        if (xSockets.includes("1")) return ":1";
         if (xSockets.length > 0) return `:${xSockets[0]}`;
       }
     } catch {}
-    return ":1";
+    return ":0";
   }
   return ":10.0";
 }
