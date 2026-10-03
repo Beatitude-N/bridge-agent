@@ -1,7 +1,7 @@
 import fs from "fs";
 import path from "path";
 import os from "os";
-import { spawn, ChildProcess } from "child_process";
+import { spawn, ChildProcess, execSync } from "child_process";
 import { AgentConfig } from "./config";
 import { BridgeAgentAccountConfig } from "./types";
 
@@ -145,11 +145,58 @@ function normalizeSymbolCase(raw: string): string {
   return upper;
 }
 
+/**
+ * Inspects active desktop processes (/proc) to discover the EXACT DISPLAY
+ * of the user's running XFCE desktop session.
+ */
+function findActiveDesktopDisplay(): string | null {
+  if (process.platform !== "linux") return null;
+  try {
+    const pidsOutput = execSync(
+      "pgrep -d, -f 'xfce4-session|xfdesktop|xfwm4|Xorg|Xvnc|Xtigervnc|x11vnc' 2>/dev/null",
+      { encoding: "utf8" }
+    ).trim();
+
+    if (pidsOutput) {
+      const pids = pidsOutput.split(",").map((p) => p.trim()).filter(Boolean);
+      for (const pid of pids) {
+        try {
+          const environPath = `/proc/${pid}/environ`;
+          if (fs.existsSync(environPath)) {
+            const raw = fs.readFileSync(environPath, "utf8");
+            const entries = raw.split("\0");
+            for (const entry of entries) {
+              if (entry.startsWith("DISPLAY=")) {
+                const disp = entry.slice("DISPLAY=".length).trim();
+                if (disp && disp !== ":99") {
+                  return disp;
+                }
+              }
+            }
+          }
+        } catch {}
+      }
+    }
+  } catch {}
+  return null;
+}
+
 function getDisplayEnv(config?: AgentConfig): string {
-  if (config?.display) return config.display;
-  if (process.env.MT5_DISPLAY) return process.env.MT5_DISPLAY;
-  if (process.env.TARGET_DISPLAY) return process.env.TARGET_DISPLAY;
+  // 1. Explicit override in config or env
+  if (config?.display && config.display !== ":99") return config.display;
+  if (process.env.MT5_DISPLAY && process.env.MT5_DISPLAY !== ":99") return process.env.MT5_DISPLAY;
+  if (process.env.TARGET_DISPLAY && process.env.TARGET_DISPLAY !== ":99") return process.env.TARGET_DISPLAY;
+
+  // 2. Auto-detect from active XFCE desktop process
+  const detectedDesktop = findActiveDesktopDisplay();
+  if (detectedDesktop) {
+    return detectedDesktop;
+  }
+
+  // 3. Environment DISPLAY if not headless :99
   if (process.env.DISPLAY && process.env.DISPLAY !== ":99") return process.env.DISPLAY;
+
+  // 4. Socket check
   if (process.platform === "linux") {
     try {
       if (fs.existsSync("/tmp/.X11-unix")) {
@@ -431,10 +478,27 @@ Profile=0
       {
         cwd: instanceDir,
         env: spawnEnv,
-        stdio: "ignore", // Prevent terminal output from leaking passwords into logs
+        stdio: ["ignore", "ignore", "pipe"],
         detached: false,
       }
     );
+
+    child.stderr?.on("data", (chunk: Buffer) => {
+      const errStr = chunk.toString("utf8");
+      for (const rawLine of errStr.split("\n")) {
+        const trimmed = rawLine.trim();
+        if (
+          trimmed &&
+          (trimmed.includes("display") ||
+            trimmed.includes("X11") ||
+            trimmed.includes("err:") ||
+            trimmed.includes("fatal") ||
+            trimmed.includes("Could not"))
+        ) {
+          console.warn(`[Wine/MT5 #${account.accountNumber}] ${trimmed}`);
+        }
+      }
+    });
   } else {
     // Windows Native
     child = spawn(
