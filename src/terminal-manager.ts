@@ -36,10 +36,17 @@ export class TerminalManager {
     if (this.isRunning) return;
     this.isRunning = true;
 
+    const platformLabel = process.platform === "linux"
+      ? "Wine (Linux)"
+      : process.platform === "darwin"
+      ? "Wine (macOS)"
+      : "Native Windows";
+
     console.log("==================================================");
     console.log("[BridgeAgent] MT5 Terminal Manager Daemon Starting");
     console.log(`[BridgeAgent] Target Server: ${this.config.backendBaseUrl}`);
-    console.log(`[BridgeAgent] Runtime: ${this.config.isWine ? "Wine (macOS)" : "Native Windows"}`);
+    console.log(`[BridgeAgent] Runtime: ${platformLabel}`);
+    console.log(`[BridgeAgent] Target Display: ${this.config.display || ":1"}`);
     console.log(`[BridgeAgent] Terminal Binary: ${this.config.terminalExePath}`);
     console.log(`[BridgeAgent] Instances Dir: ${this.config.instancesDir}`);
     console.log("==================================================");

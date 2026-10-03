@@ -11,6 +11,7 @@ export interface AgentConfig {
   wineBinPath?: string;
   winePrefix?: string;
   pollIntervalMs: number;
+  display: string;
 }
 
 /**
@@ -104,6 +105,33 @@ export function loadAgentConfig(): AgentConfig {
     ? parseInt(process.env.POLL_INTERVAL_MS, 10)
     : 30000;
 
+  // Compute target GUI display (Prioritizes visible desktop over headless :99)
+  let display = process.env.MT5_DISPLAY || process.env.TARGET_DISPLAY || "";
+  if (!display && process.env.DISPLAY && process.env.DISPLAY !== ":99") {
+    display = process.env.DISPLAY;
+  }
+  if (!display && isLinux) {
+    try {
+      if (fs.existsSync("/tmp/.X11-unix")) {
+        const files = fs.readdirSync("/tmp/.X11-unix");
+        const xSockets = files
+          .filter((f) => f.startsWith("X"))
+          .map((f) => f.slice(1))
+          .filter((num) => num !== "99"); // Exclude headless Xvfb (:99)
+        if (xSockets.includes("1")) {
+          display = ":1";
+        } else if (xSockets.includes("0")) {
+          display = ":0";
+        } else if (xSockets.length > 0) {
+          display = `:${xSockets[0]}`;
+        }
+      }
+    } catch {}
+  }
+  if (!display) {
+    display = isMac ? ":10.0" : ":1";
+  }
+
   return {
     backendBaseUrl,
     bridgeAgentSecret,
@@ -113,5 +141,6 @@ export function loadAgentConfig(): AgentConfig {
     wineBinPath,
     winePrefix,
     pollIntervalMs,
+    display,
   };
 }

@@ -1,5 +1,6 @@
 import fs from "fs";
 import path from "path";
+import os from "os";
 import { spawn, ChildProcess } from "child_process";
 import { AgentConfig } from "./config";
 import { BridgeAgentAccountConfig } from "./types";
@@ -144,13 +145,19 @@ function normalizeSymbolCase(raw: string): string {
   return upper;
 }
 
-function getDisplayEnv(): string {
-  if (process.env.DISPLAY) return process.env.DISPLAY;
+function getDisplayEnv(config?: AgentConfig): string {
+  if (config?.display) return config.display;
+  if (process.env.MT5_DISPLAY) return process.env.MT5_DISPLAY;
+  if (process.env.TARGET_DISPLAY) return process.env.TARGET_DISPLAY;
+  if (process.env.DISPLAY && process.env.DISPLAY !== ":99") return process.env.DISPLAY;
   if (process.platform === "linux") {
     try {
       if (fs.existsSync("/tmp/.X11-unix")) {
         const files = fs.readdirSync("/tmp/.X11-unix");
-        const xSockets = files.filter((f) => f.startsWith("X")).map((f) => f.slice(1));
+        const xSockets = files
+          .filter((f) => f.startsWith("X"))
+          .map((f) => f.slice(1))
+          .filter((num) => num !== "99"); // Never choose headless Xvfb (:99)
         if (xSockets.includes("1")) return ":1";
         if (xSockets.includes("0")) return ":0";
         if (xSockets.length > 0) return `:${xSockets[0]}`;
@@ -383,16 +390,31 @@ Profile=0
 
   if (config.isWine) {
     const wineBin = config.wineBinPath || "wine";
-    const activeDisplay = getDisplayEnv();
+    const activeDisplay = getDisplayEnv(config);
 
     console.log(`[Launcher] Spawning MT5 for account ${account.accountNumber} with DISPLAY=${activeDisplay} on symbol '${targetSymbol}'...`);
 
-    const spawnEnv = {
+    const spawnEnv: NodeJS.ProcessEnv = {
       ...process.env,
       DISPLAY: activeDisplay,
       WINEPREFIX: config.winePrefix || "",
       WINEDEBUG: "-all", // Suppress noisy Wine debug logs
     };
+
+    // Forward XAUTHORITY to ensure permission to connect to active X11 desktop
+    const homeDir = os.homedir();
+    const xauthCandidates = [
+      process.env.XAUTHORITY,
+      path.join(homeDir, ".Xauthority"),
+      "/root/.Xauthority",
+    ].filter(Boolean) as string[];
+
+    for (const authPath of xauthCandidates) {
+      if (fs.existsSync(authPath)) {
+        spawnEnv.XAUTHORITY = authPath;
+        break;
+      }
+    }
 
     // On Apple Silicon (arm64), Wine is an x86_64 binary. Calling spawn directly from an arm64
     // Node.js process causes macOS posix_spawnp to throw EBADARCH (errno -86: 'Bad CPU type in executable').
