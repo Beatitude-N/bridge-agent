@@ -357,10 +357,11 @@ Password=${safePassword}
 Server=${account.server}
 EnableNews=0
 
-[Charts]
-ProfileLast=Default
-
 [StartUp]
+Symbol=${targetSymbol}
+Period=H1
+Expert=BfxBridge.ex5
+ExpertParameters=BfxBridge.set
 ShutdownTerminal=0
 
 [Experts]
@@ -383,6 +384,8 @@ Profile=0
   if (config.isWine) {
     const wineBin = config.wineBinPath || "wine";
     const activeDisplay = getDisplayEnv();
+
+    console.log(`[Launcher] Spawning MT5 for account ${account.accountNumber} with DISPLAY=${activeDisplay} on symbol '${targetSymbol}'...`);
 
     const spawnEnv = {
       ...process.env,
