@@ -269,6 +269,26 @@ export async function launchMt5Terminal(
   fs.writeFileSync(path.join(instanceDir, "BfxBridge.set"), setBuffer);
   fs.writeFileSync(path.join(basePresetsDir, "BfxBridge.set"), setBuffer);
 
+  // 3. Write single UTF-16LE chart file with auto-loaded EA for the target Gold symbol
+  const chartBuffer = buildDefaultChartBuffer(config.backendBaseUrl, account.id, targetSymbol);
+  const chartPath = path.join(chartsDir, "chart01.chr");
+  fs.writeFileSync(chartPath, chartBuffer);
+
+  // Also write chart file to base MT5 profile
+  try {
+    const baseChartsDir = path.join(baseTerminalDir, "MQL5", "Profiles", "Charts", "Default");
+    fs.mkdirSync(baseChartsDir, { recursive: true });
+    const baseFiles = fs.readdirSync(baseChartsDir);
+    for (const file of baseFiles) {
+      if (file.toLowerCase().endsWith(".chr") && file !== "chart01.chr") {
+        fs.unlinkSync(path.join(baseChartsDir, file));
+      }
+    }
+    fs.writeFileSync(path.join(baseChartsDir, "chart01.chr"), chartBuffer);
+  } catch {
+    // Best-effort copy to base
+  }
+
   // Copy network cache (servers.dat, dnsperf.dat) into instance config so broker discovery is instant
   if (fs.existsSync(baseConfigDir)) {
     for (const f of ["servers.dat", "dnsperf.dat"]) {
@@ -327,7 +347,7 @@ export async function launchMt5Terminal(
     ? `Z:${targetExe.replace(/\//g, "\\")}`
     : targetExe;
 
-  // 4. Write transient account.ini with strict 0600 file permissions and native [StartUp]
+  // 4. Write transient account.ini with strict 0600 file permissions and persistent profile loading
   const accountIniPath = path.join(instanceDir, "account.ini");
   const safePassword = decryptedPassword || "";
 
@@ -337,11 +357,11 @@ Password=${safePassword}
 Server=${account.server}
 EnableNews=0
 
+[Charts]
+ProfileLast=Default
+
 [StartUp]
-Symbol=${targetSymbol}
-Period=H1
-Expert=BfxBridge.ex5
-ExpertParameters=BfxBridge.set
+ShutdownTerminal=0
 
 [Experts]
 AllowDll=1
